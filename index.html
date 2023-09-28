@@ -1,14 +1,104 @@
 <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<script src="https://unpkg.com/axios@1.5.1/dist/axios.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
 
-<div id="app">{{ message }}</div>
+<head></head>
+
+<div id="app">
+  <h1>Refgraph generator</h1>
+  <div>
+    <p>current paper: {{ currentDOI || "none" }}</p>
+    <input v-model="doiInput" placeholder="doi" />
+    <button @click="updateDOIAndGetReferences">get references</button>
+  </div>
+
+  <div>
+    <input
+      @input="updateSearchResults"
+      v-model="searchQuery"
+      placeholder="search references"
+    />
+    <template v-if="!searchQuery" v-for="ref in currentDOIReferences">
+      <div>
+        <p>{{ ref.title }} ({{ ref.year }})</p>
+        <p>{{ ref.authorsString }}</p>
+        <p>{{ ref.abstract }}</p>
+      </div>
+    </template>
+    <template v-else v-for="ref in searchResults">
+      <div>
+        <p>{{ ref.title }} ({{ ref.year }})</p>
+        <p>{{ ref.authorsString }}</p>
+        <p>{{ ref.abstract }}</p>
+      </div>
+    </template>
+  </div>
+</div>
 
 <script>
   const { createApp } = Vue;
 
+  const getReferencesForDOI = async (doi) => {
+    let response;
+    try {
+      response = await axios.get(
+        `https://api.semanticscholar.org/graph/v1/paper/DOI:${doi}/references?fields=authors,title,abstract,venue,year,url,externalIds&offset=0&limit=1000`
+      );
+    } catch (e) {
+      console.log(e);
+      return [];
+    }
+
+    console.log("response", response);
+
+    const references = [];
+    for (const ref of response.data.data) {
+      const { paperId, authors } = ref.citedPaper;
+      if (!paperId) {
+        continue;
+      }
+
+      const authorsString = authors.map((a) => a.name).join(", ");
+
+      references.push({
+        ...ref.citedPaper,
+        authorsString,
+      });
+    }
+
+    return references;
+  };
+
   createApp({
+    methods: {
+      async updateDOIAndGetReferences() {
+        this.currentDOI = this.doiInput;
+        const references = await getReferencesForDOI(this.currentDOI);
+        console.log("references", references);
+        this.currentDOIReferences = references;
+      },
+
+      updateSearchResults() {
+        console.log("update");
+        const options = {
+          includeScore: false,
+          keys: ["authorsString", "year", "title"],
+        };
+        const fuse = new Fuse(this.currentDOIReferences, options);
+        const result = fuse.search(this.searchQuery);
+
+        console.log(result);
+
+        this.searchResults = result.map((r) => r.item);
+      },
+    },
     data() {
       return {
-        message: "Hello Vue!",
+        doiInput: "",
+        currentDOIReferences: [],
+        currentDOI: "",
+        searchQuery: "",
+        searchResults: [],
       };
     },
   }).mount("#app");
